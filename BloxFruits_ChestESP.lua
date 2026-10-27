@@ -25,6 +25,7 @@ local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 local JobId = game.JobId
 local scriptActive = true
+local bootTick = os.clock()
 
 repeat task.wait(0.3) until LocalPlayer:FindFirstChild("PlayerGui")
 task.wait(2)
@@ -51,6 +52,10 @@ local STATE = {
     AutoHopEmpty = true,
     NoclipOn = true,
     AutoGrabKey = true,
+    HuntKeyMode = false,
+    HuntLootFirst = true,
+    HuntedServers = 0,
+    KillTween = false,
     HopMaxPlayers = 2,
     KeyFound = false,
     Collected = 0,
@@ -170,6 +175,7 @@ local ValTarget
 local ValUptime
 local ValPlayers
 local ValHopStatus
+local ValHunted
 local HopOldBtn
 local HopRandBtn
 local HopLowBtn
@@ -669,8 +675,11 @@ ValKeyMap = mkInfo(PageEsp, 7, "🗝️ Key Râu Đen trên map:", "0")
 
 mkToggle(PageFarm, 1, "🤏 Auto Thu Rương (Bay Tới Nhặt)", function() return STATE.AutoCollect end, function(v)
     STATE.AutoCollect = v
-    if not v and STATE.CurrentTween then
-        pcall(function() STATE.CurrentTween:Cancel() end)
+    if not v then
+        STATE.KillTween = true
+        if STATE.CurrentTween then
+            pcall(function() STATE.CurrentTween:Cancel() end)
+        end
     end
 end)
 mkToggle(PageFarm, 2, "⏭️ Bỏ Qua Rương Bạc", function() return STATE.SkipSilver end, function(v) STATE.SkipSilver = v end)
@@ -694,6 +703,20 @@ HopOldBtn = mkButton(PageHop, 4, "🕰️ HOP SERVER CŨ NHẤT (Treo 3-4h+)", C
 HopRandBtn = mkButton(PageHop, 5, "🎲 Hop Server Cũ Ngẫu Nhiên", Color3.fromRGB(30, 90, 60))
 HopLowBtn = mkButton(PageHop, 6, "🌐 Hop Server Ít Người Nhất", Color3.fromRGB(24, 60, 90))
 ValHopStatus = mkInfo(PageHop, 7, "📊 Trạng thái:", "Sẵn sàng")
+mkToggle(PageHop, 8, "🎯 SĂN KEY 100% (Hop Tới Khi Gặp Key)", function() return STATE.HuntKeyMode end, function(v)
+    STATE.HuntKeyMode = v
+    if v then
+        STATE.HuntedServers = 0
+        pcall(function()
+            if ValHunted and ValHunted.Parent then
+                ValHunted.Text = "0 server"
+            end
+        end)
+        setStatus("🎯 Săn Key 100% BẬT - sẽ hop tới khi gặp server có key!")
+    end
+end)
+mkToggle(PageHop, 9, "💰 Mở Hết Rương Trước Khi Hop", function() return STATE.HuntLootFirst end, function(v) STATE.HuntLootFirst = v end)
+ValHunted = mkInfo(PageHop, 10, "🔎 Đã dò săn:", "0 server")
 
 mkInfo(PageSys, 1, "🆔 Server ID:", string.sub(JobId, 1, 8) .. "...")
 ValAction = mkInfo(PageSys, 2, "📍 Trạng thái:", "Sẵn sàng 💰")
@@ -934,6 +957,14 @@ local function rescanFists()
     end
 end
 
+local function countFists()
+    local n = 0
+    for root, _ in pairs(FistMap) do
+        if root and root.Parent then n = n + 1 end
+    end
+    return n
+end
+
 Workspace.DescendantAdded:Connect(function(v)
     if NAME_TO_TIER[v.Name] and v:IsA("BasePart") then
         task.defer(function()
@@ -1039,6 +1070,7 @@ local function onKeyDetected()
     end)
     if STATE.StopOnKey then
         STATE.AutoCollect = false
+        STATE.KillTween = true
         if STATE.CurrentTween then
             pcall(function() STATE.CurrentTween:Cancel() end)
         end
@@ -1063,7 +1095,7 @@ task.spawn(function()
 end)
 
 RunService.Stepped:Connect(function()
-    if STATE.AutoCollect and STATE.NoclipOn then
+    if (STATE.AutoCollect or STATE.HuntKeyMode) and STATE.NoclipOn then
         local char = LocalPlayer.Character
         if char then
             for _, p in ipairs(char:GetDescendants()) do
@@ -1087,6 +1119,7 @@ local function tweenToChest(part)
     local dist = (hrp.Position - targetPos).Magnitude
     local duration = math.max(dist / CONFIG.CollectSpeed, 0.12)
     local tw = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)})
+    STATE.KillTween = false
     STATE.CurrentTween = tw
     tw:Play()
     local completed = false
@@ -1096,7 +1129,7 @@ local function tweenToChest(part)
     local t0 = os.clock()
     local maxWait = duration + 2.5
     while os.clock() - t0 < maxWait do
-        if not STATE.AutoCollect then
+        if STATE.KillTween then
             pcall(function() tw:Cancel() end)
             STATE.CurrentTween = nil
             return false
@@ -1320,7 +1353,8 @@ end)
 task.spawn(function()
     while scriptActive do
         task.wait(0.5)
-        if not STATE.AutoCollect then
+        if not STATE.AutoCollect and not STATE.HuntKeyMode then
+            STATE.KillTween = true
             if STATE.CurrentTween then
                 pcall(function() STATE.CurrentTween:Cancel() end)
                 STATE.CurrentTween = nil
@@ -1339,6 +1373,34 @@ task.spawn(function()
                     task.wait(1.5)
                 else
                     local list = getSortedChests()
+                    local proceedCollect = true
+                    if STATE.HuntKeyMode then
+                        if os.clock() - bootTick < 7 then
+                            proceedCollect = false
+                            setStatus("⏳ Săn Key: đợi map tải đủ...")
+                            task.wait(2)
+                        elseif countFists() > 0 then
+                            proceedCollect = false
+                            setStatus("🗝️ SERVER NÀY CÓ KEY RÂU ĐEN 🔴 - ĐANG NHẶT!")
+                            task.wait(1.5)
+                        elseif STATE.HuntLootFirst and #list > 0 then
+                            setStatus("💰 Không thấy key rớt - mở rương xét xác suất...")
+                        else
+                            proceedCollect = false
+                            STATE.HuntedServers = STATE.HuntedServers + 1
+                            pcall(function()
+                                if ValHunted and ValHunted.Parent then
+                                    ValHunted.Text = tostring(STATE.HuntedServers) .. " server"
+                                end
+                            end)
+                            setStatus("🔎 Không có key - hop server săn tiếp...")
+                            task.wait(1.2)
+                            if STATE.HuntKeyMode then
+                                hopServer("oldest", "🎯 Săn Key 100%: dò server cũ tiếp...")
+                            end
+                        end
+                    end
+                    if proceedCollect then
                     if #list == 0 then
                         if STATE.AutoHopEmpty then
                             setStatus("📭 Hết rương! Đang chuyển server cũ...")
@@ -1397,6 +1459,7 @@ task.spawn(function()
                             end
                         end
                     end
+                    end
                 end
             end
         end
@@ -1406,7 +1469,7 @@ end)
 task.spawn(function()
     while scriptActive do
         task.wait(1)
-        if STATE.AutoCollect and STATE.AutoGrabKey and not STATE.IsHopping and not STATE.KeyFound then
+        if STATE.AutoGrabKey and not STATE.IsHopping and not STATE.KeyFound then
             local char, hrp = getCharacter()
             if hrp then
                 local fistTarget = nil
@@ -1422,6 +1485,7 @@ task.spawn(function()
                 end
                 if fistTarget then
                     STATE.GrabbingKey = true
+                    STATE.KillTween = true
                     if STATE.CurrentTween then
                         pcall(function() STATE.CurrentTween:Cancel() end)
                         task.wait(0.3)
@@ -1434,7 +1498,7 @@ task.spawn(function()
                     end)
                     local t0 = os.clock()
                     while fistTarget and fistTarget.Parent and os.clock() - t0 < 25 do
-                        if not STATE.AutoCollect or not STATE.AutoGrabKey then break end
+                        if not STATE.AutoGrabKey then break end
                         tweenToChest(fistTarget)
                         task.wait(0.35)
                         if hasFistOfDarkness() then break end
