@@ -32,7 +32,7 @@ task.wait(2)
 
 local CONFIG = {
     GitHubRawURL = (getgenv and getgenv().FruitSniperURL) or _G.FruitSniperURL or "",
-    AutoReExecute = false,
+    AutoReExecute = true,
     GhostInvisibility = true,
     StealthFlyAltitude = 280,
     Team = "Pirates",
@@ -82,6 +82,9 @@ local GojoIconAsset = resolveAsset("BF_GojoIcon.jpg", CONFIG.DefaultIcon)
 
 local function setupAutoRestart()
     if not CONFIG.AutoReExecute then return end
+    local queueFunc = (syn and syn.queue_on_teleport) or queue_on_teleport or queueonteleport or (fluxus and fluxus.queue_on_teleport)
+    if not queueFunc then return end
+
     local url = CONFIG.GitHubRawURL
     if (not url or url == "") and getgenv and getgenv().FruitSniperURL then
         url = getgenv().FruitSniperURL
@@ -97,9 +100,62 @@ local function setupAutoRestart()
         pcall(function()
             if writefile then
                 writefile("BF_ScriptURL.txt", url)
-                writefile("autoexec/FruitSniper.lua", string.format('task.wait(3); pcall(function() loadstring(game:HttpGet("%s"))() end)', url))
+                writefile("autoexec/FruitSniper.lua", string.format('task.wait(4); pcall(function() loadstring(game:HttpGet("%s"))() end)', url))
             end
         end)
+        pcall(function()
+            queueFunc(string.format([[
+                task.spawn(function()
+                    repeat task.wait(1) until game:IsLoaded()
+                    local plrs = game:GetService("Players")
+                    repeat task.wait(1) until plrs.LocalPlayer
+                    task.wait(4)
+                    pcall(function()
+                        loadstring(game:HttpGet("%s"))()
+                    end)
+                end)
+            ]], url))
+        end)
+    else
+        local localFile = nil
+        local candidates = {"FruitSniper.lua", "fruitsniper.lua", "BloxFruits_FruitSniper_ServerHop.lua", "Sniper.lua"}
+        if isfile then
+            for _, fn in ipairs(candidates) do
+                if isfile(fn) then localFile = fn break end
+            end
+        end
+
+        if localFile then
+            pcall(function()
+                queueFunc(string.format([[
+                    task.spawn(function()
+                        repeat task.wait(1) until game:IsLoaded()
+                        local plrs = game:GetService("Players")
+                        repeat task.wait(1) until plrs.LocalPlayer
+                        task.wait(4)
+                        pcall(function()
+                            loadstring(readfile("%s"))()
+                        end)
+                    end)
+                ]], localFile))
+            end)
+        else
+            pcall(function()
+                queueFunc([[
+                    task.spawn(function()
+                        repeat task.wait(1) until game:IsLoaded()
+                        local plrs = game:GetService("Players")
+                        repeat task.wait(1) until plrs.LocalPlayer
+                        task.wait(4)
+                        if isfile and isfile("FruitSniper.lua") then
+                            pcall(function() loadstring(readfile("FruitSniper.lua"))() end)
+                        elseif isfile and isfile("BF_ScriptURL.txt") then
+                            pcall(function() loadstring(game:HttpGet(readfile("BF_ScriptURL.txt")))() end)
+                        end
+                    end)
+                ]])
+            end)
+        end
     end
 end
 
@@ -775,9 +831,9 @@ createSettingRow("💎 Trùng Kho:", "Bảo Vệ Trái", 80, function(btn)
     end
 end)
 
-createSettingRow("🔄 Tự Chạy Lại:", "TẮT (Chống Văng)", 120, function(btn)
+createSettingRow("🔄 Tự Chạy Lại:", "BẬT (Tự Động)", 120, function(btn)
     CONFIG.AutoReExecute = not CONFIG.AutoReExecute
-    btn.Text = CONFIG.AutoReExecute and "BẬT (Autoexec)" or "TẮT (Chống Văng)"
+    btn.Text = CONFIG.AutoReExecute and "BẬT (Tự Động)" or "TẮT"
 end)
 
 createSettingRow("👻 Tàng Hình:", "BẬT", 160, function(btn)
