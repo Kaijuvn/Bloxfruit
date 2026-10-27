@@ -56,6 +56,9 @@ local STATE = {
     HuntLootFirst = true,
     HuntedServers = 0,
     KillTween = false,
+    LastTryId = nil,
+    RetryHop = false,
+    LastHopMode = "oldest",
     HopMaxPlayers = 2,
     KeyFound = false,
     Collected = 0,
@@ -1203,6 +1206,7 @@ local function fetchOldServers()
         if ok and res and res.data then
             for _, s in ipairs(res.data) do
                 if s.id and s.id ~= JobId and s.playing and s.maxPlayers
+                    and s.playing > 0
                     and s.playing < s.maxPlayers
                     and s.playing <= STATE.HopMaxPlayers
                     and not VisitedServers[s.id] then
@@ -1221,6 +1225,7 @@ end
 
 local function teleportTo(id)
     STATE.IsHopping = true
+    STATE.LastTryId = id
     VisitedServers[id] = true
     VisitedServers[JobId] = true
     pcall(setupAutoRestart)
@@ -1229,10 +1234,13 @@ local function teleportTo(id)
     end)
     task.wait(4)
     STATE.IsHopping = false
+    STATE.LastTryId = nil
 end
 
 local function hopServer(mode, statusLabel)
     if STATE.IsHopping then return end
+    STATE.LastHopMode = mode
+    STATE.RetryHop = true
     statusLabel = statusLabel or "Đang quét server cũ (lâu ngày)..."
     setStatus(statusLabel)
     pcall(function()
@@ -1269,7 +1277,8 @@ local function hopServer(mode, statusLabel)
         local upper = math.min(#cands, 20)
         pick = cands[math.random(1, upper)]
     else
-        pick = cands[1]
+        local upperOld = math.min(#cands, 10)
+        pick = cands[math.random(1, upperOld)]
     end
     pcall(function()
         if ValHopStatus and ValHopStatus.Parent then
@@ -1296,6 +1305,31 @@ HopLowBtn.MouseButton1Click:Connect(function()
     task.spawn(function()
         hopServer("low", "🌐 Tìm server ít người nhất...")
     end)
+end)
+
+TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+    local wasOurHop = (STATE.LastTryId ~= nil)
+    pcall(function()
+        if STATE.LastTryId then
+            VisitedServers[STATE.LastTryId] = true
+            STATE.LastTryId = nil
+        end
+    end)
+    STATE.IsHopping = false
+    if not wasOurHop then return end
+    setStatus("⚠️ Server chết/bị chặn (773) - tự đổi server khác...")
+    pcall(function()
+        if ValHopStatus and ValHopStatus.Parent then
+            ValHopStatus.Text = "Server lỗi 773 - đang thử cái khác..."
+        end
+    end)
+    if STATE.RetryHop then
+        task.delay(2, function()
+            if STATE.RetryHop and not STATE.IsHopping then
+                hopServer(STATE.LastHopMode or "oldest", "🔄 Thử server kế tiếp...")
+            end
+        end)
+    end
 end)
 
 RejoinBtn.MouseButton1Click:Connect(function()
