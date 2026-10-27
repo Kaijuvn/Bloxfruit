@@ -1412,70 +1412,167 @@ local function triggerUiButtonClick(btn)
     end)
 end
 
-local function performStoreAction(tool)
-    local char = getCharacter()
-    local hum = char:WaitForChild("Humanoid")
-    local rem = ReplicatedStorage:FindFirstChild("Remotes")
-    local commF = rem and (rem:FindFirstChild("CommF_") or rem:FindFirstChild("CommF"))
-    local fruitId = getStandardFruitId(tool)
-    local origName = tool:GetAttribute("OriginalName") or fruitId
+local function tapScreenOnce()
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
+    local vp = cam.ViewportSize
+    local cx, cy = vp.X / 2, vp.Y / 2
 
-    hum:EquipTool(tool)
-    task.wait(0.2)
-
-    pcall(function() tool:Activate() end)
     pcall(function()
         if VirtualInputManager then
-            local center = Vector2.new(Workspace.CurrentCamera.ViewportSize.X / 2, Workspace.CurrentCamera.ViewportSize.Y / 2)
-            VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+            VirtualInputManager:SendTouchEvent(1, 0, cx, cy)
             task.wait(0.03)
-            VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+            VirtualInputManager:SendTouchEvent(1, 2, cx, cy)
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+            task.wait(0.03)
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
         end
     end)
-    task.wait(0.25)
 
+    pcall(function()
+        VirtualUser:Button1Down(Vector2.new(cx, cy))
+        task.wait(0.03)
+        VirtualUser:Button1Up(Vector2.new(cx, cy))
+    end)
+end
+
+local function isInsideOwnGui(inst)
+    local anc = inst.Parent
+    while anc do
+        if anc.Name == "VipAnimeFruitSniper" then return true end
+        anc = anc.Parent
+    end
+    return false
+end
+
+local function isActuallyVisible(inst)
+    local anc = inst
+    while anc and anc ~= game do
+        if anc:IsA("GuiObject") and not anc.Visible then return false end
+        if anc:IsA("ScreenGui") and not anc.Enabled then return false end
+        anc = anc.Parent
+    end
+    return true
+end
+
+local STORE_TEXTS = {"store", "store fruit", "lưu trữ", "luu tru"}
+
+local function buttonHasStoreText(btn)
+    local function txtMatch(s)
+        s = tostring(s or ""):lower()
+        for _, k in ipairs(STORE_TEXTS) do
+            if string.find(s, k, 1, true) then return true end
+        end
+        return false
+    end
+
+    if txtMatch(btn.Name) then return true end
+
+    local okSelf, selfText = pcall(function() return btn.Text end)
+    if okSelf and txtMatch(selfText) then return true end
+
+    for _, d in pairs(btn:GetDescendants()) do
+        if d:IsA("TextLabel") or d:IsA("TextButton") then
+            local ok, t = pcall(function() return d.Text end)
+            if ok and txtMatch(t) then return true end
+        end
+    end
+    return false
+end
+
+local function collectStoreButtons(root)
+    local found = {}
+    if not root then return found end
+    pcall(function()
+        for _, btn in pairs(root:GetDescendants()) do
+            if (btn:IsA("TextButton") or btn:IsA("ImageButton")) and not isInsideOwnGui(btn) then
+                if isActuallyVisible(btn) and buttonHasStoreText(btn) then
+                    table.insert(found, btn)
+                end
+            end
+        end
+    end)
+    return found
+end
+
+local function findNewStoreButton(beforeSet)
     local pGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if pGui then
-        for _, btn in pairs(pGui:GetDescendants()) do
-            if (btn:IsA("TextButton") or btn:IsA("ImageButton")) and btn.Visible then
-                local bName = btn.Name:lower()
-                local bText = tostring(btn.Text or ""):lower()
-                local isStore = false
+    local buttons = collectStoreButtons(pGui)
 
-                if bText == "store" or bText == "lưu trữ" or string.find(bText, "store") or string.find(bText, "lưu trữ") or bName == "store" or bName == "option3" then
-                    isStore = true
-                else
-                    local innerText = btn:FindFirstChildWhichIsA("TextLabel")
-                    if innerText and innerText.Visible then
-                        local iText = innerText.Text:lower()
-                        if iText == "store" or iText == "lưu trữ" or string.find(iText, "store") or string.find(iText, "lưu trữ") then
-                            isStore = true
-                        end
-                    end
-                end
-
-                if isStore then
-                    triggerUiButtonClick(btn)
-                    task.wait(0.15)
-                    break
-                end
+    if gethui then
+        local ok, hui = pcall(gethui)
+        if ok and hui and hui ~= pGui then
+            for _, b in ipairs(collectStoreButtons(hui)) do
+                table.insert(buttons, b)
             end
         end
     end
 
-    if commF then
-        pcall(function() commF:InvokeServer("StoreFruit", origName, tool) end)
-        pcall(function() commF:InvokeServer("StoreFruit", origName, LocalPlayer.Backpack:FindFirstChild(tool.Name)) end)
-        pcall(function() commF:InvokeServer("StoreFruit", origName) end)
-        pcall(function() commF:InvokeServer("StoreFruit", fruitId, tool) end)
-        pcall(function() commF:InvokeServer("StoreFruit", fruitId, LocalPlayer.Backpack:FindFirstChild(tool.Name)) end)
-        pcall(function() commF:InvokeServer("StoreFruit", fruitId) end)
-        pcall(function() commF:InvokeServer("StoreFruit", tool.Name, tool) end)
-        pcall(function() commF:InvokeServer("StoreFruit", tool.Name) end)
+    for _, btn in ipairs(buttons) do
+        if not beforeSet[btn] then return btn end
+    end
+    return buttons[1]
+end
+
+local function performStoreAction(tool)
+    local char = getCharacter()
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local rem = ReplicatedStorage:FindFirstChild("Remotes")
+    local commF = rem and (rem:FindFirstChild("CommF_") or rem:FindFirstChild("CommF"))
+    local fruitId = getStandardFruitId(tool)
+    local origName = fruitId
+    pcall(function()
+        local attr = tool:GetAttribute("OriginalName")
+        if type(attr) == "string" and attr ~= "" then origName = attr end
+    end)
+
+    local function fireStoreRemotes(targetTool)
+        if not commF then return end
+        task.spawn(function() pcall(function() commF:InvokeServer("StoreFruit", origName, targetTool) end) end)
+        task.spawn(function() pcall(function() commF:InvokeServer("StoreFruit", origName) end) end)
+        task.spawn(function() pcall(function() commF:InvokeServer("StoreFruit", fruitId, targetTool) end) end)
     end
 
-    task.wait(0.2)
-    pcall(function() hum:UnequipTools() end)
+    pcall(function()
+        if hum then hum:UnequipTools() end
+    end)
+    task.wait(0.12)
+
+    for burst = 1, 4 do
+        if not isFruitStillInHandsOrBackpack(tool) then return end
+        local backTool = LocalPlayer.Backpack:FindFirstChild(tool.Name)
+        fireStoreRemotes(backTool or tool)
+        task.wait(0.18)
+    end
+
+    if not isFruitStillInHandsOrBackpack(tool) then return end
+
+    local beforeSet = {}
+    for _, btn in ipairs(collectStoreButtons(LocalPlayer:FindFirstChild("PlayerGui"))) do
+        beforeSet[btn] = true
+    end
+
+    pcall(function()
+        if hum then hum:EquipTool(tool) end
+    end)
+    task.wait(0.12)
+    pcall(function() tool:Activate() end)
+    tapScreenOnce()
+    task.wait(0.3)
+
+    local storeBtn = findNewStoreButton(beforeSet)
+    if storeBtn then
+        triggerUiButtonClick(storeBtn)
+        task.wait(0.22)
+    end
+
+    fireStoreRemotes(tool)
+    task.wait(0.15)
+
+    pcall(function()
+        if hum then hum:UnequipTools() end
+    end)
 end
 
 local function storeAllFruitsUntilDone()
@@ -1501,20 +1598,27 @@ local function storeAllFruitsUntilDone()
     if #fruits == 0 then return true, nil end
 
     for _, fruitTool in ipairs(fruits) do
-        setStatus("📦 Đang tự động lưu trữ: " .. fruitTool.Name, Color3.fromRGB(255, 0, 128))
+        setStatus("⚡ Lưu trữ nhanh: " .. fruitTool.Name, Color3.fromRGB(255, 0, 128))
         local storedSuccess = false
 
-        for attempt = 1, 8 do
+        for attempt = 1, 6 do
             if not isFruitStillInHandsOrBackpack(fruitTool) then
                 storedSuccess = true
                 break
             end
 
             performStoreAction(fruitTool)
-            task.wait(0.6)
+            if not isFruitStillInHandsOrBackpack(fruitTool) then
+                storedSuccess = true
+                break
+            end
+            task.wait(0.3)
         end
 
-        if not storedSuccess and isFruitStillInHandsOrBackpack(fruitTool) then
+        if storedSuccess or not isFruitStillInHandsOrBackpack(fruitTool) then
+            setStatus("✅ Đã cất: " .. fruitTool.Name, Color3.fromRGB(0, 255, 120))
+            task.wait(0.5)
+        else
             return false, fruitTool
         end
     end
