@@ -20,6 +20,7 @@ local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
 local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
+local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -35,7 +36,8 @@ local CONFIG = {
     AutoReExecute = true,
     CollectSpeed = 250,
     ScanInterval = 2.5,
-    HopScanPages = 4,
+    HopScanPages = 6,
+    HopSkipHead = 120,
     HopEmptyDelay = 4,
     DefaultBackground = "rbxassetid://16140502159",
     DefaultIcon = "rbxassetid://14207920404"
@@ -151,6 +153,16 @@ LocalPlayer.Idled:Connect(function()
         VirtualUser:Button2Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
         task.wait(0.2)
         VirtualUser:Button2Up(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+    end)
+end)
+
+pcall(function()
+    GuiService.ErrorMessageChanged:Connect(function()
+        task.defer(function()
+            pcall(function()
+                GuiService:ClearError()
+            end)
+        end)
     end)
 end)
 
@@ -1195,6 +1207,7 @@ end)
 local function fetchOldServers()
     local cands = {}
     local cursor = ""
+    local entryIdx = 0
     for page = 1, CONFIG.HopScanPages do
         local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
         if cursor ~= "" then
@@ -1205,9 +1218,11 @@ local function fetchOldServers()
         end)
         if ok and res and res.data then
             for _, s in ipairs(res.data) do
-                if s.id and s.id ~= JobId and s.playing and s.maxPlayers
+                entryIdx = entryIdx + 1
+                if entryIdx > CONFIG.HopSkipHead
+                    and s.id and s.id ~= JobId and s.playing and s.maxPlayers
                     and s.playing > 0
-                    and s.playing < s.maxPlayers
+                    and s.playing <= s.maxPlayers - 2
                     and s.playing <= STATE.HopMaxPlayers
                     and not VisitedServers[s.id] then
                     table.insert(cands, {Id = s.id, Playing = s.playing})
@@ -1232,9 +1247,30 @@ local function teleportTo(id)
     pcall(function()
         TeleportService:TeleportToPlaceInstance(PlaceId, id, LocalPlayer)
     end)
-    task.wait(4)
+    for i = 1, 8 do
+        task.wait(1)
+        if STATE.LastTryId ~= id then
+            break
+        end
+    end
+    if STATE.LastTryId == id then
+        STATE.LastTryId = nil
+        STATE.IsHopping = false
+        setStatus("⚠️ Server bị treo không vào được - đổi server khác...")
+        pcall(function()
+            if ValHopStatus and ValHopStatus.Parent then
+                ValHopStatus.Text = "Server treo - đang đổi cái khác..."
+            end
+        end)
+        if STATE.RetryHop then
+            task.delay(1.5, function()
+                if STATE.RetryHop and not STATE.IsHopping then
+                    hopServer(STATE.LastHopMode or "oldest", "🔄 Thử server kế tiếp...")
+                end
+            end)
+        end
+    end
     STATE.IsHopping = false
-    STATE.LastTryId = nil
 end
 
 local function hopServer(mode, statusLabel)
@@ -1277,7 +1313,7 @@ local function hopServer(mode, statusLabel)
         local upper = math.min(#cands, 20)
         pick = cands[math.random(1, upper)]
     else
-        local upperOld = math.min(#cands, 10)
+        local upperOld = math.min(#cands, 15)
         pick = cands[math.random(1, upperOld)]
     end
     pcall(function()
