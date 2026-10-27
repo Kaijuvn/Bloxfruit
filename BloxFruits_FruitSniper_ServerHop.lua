@@ -32,7 +32,7 @@ task.wait(2)
 
 local CONFIG = {
     GitHubRawURL = (getgenv and getgenv().FruitSniperURL) or _G.FruitSniperURL or "",
-    AutoReExecute = true,
+    AutoReExecute = false,
     GhostInvisibility = true,
     StealthFlyAltitude = 280,
     Team = "Pirates",
@@ -82,9 +82,6 @@ local GojoIconAsset = resolveAsset("BF_GojoIcon.jpg", CONFIG.DefaultIcon)
 
 local function setupAutoRestart()
     if not CONFIG.AutoReExecute then return end
-    local queueFunc = (syn and syn.queue_on_teleport) or queue_on_teleport or queueonteleport or (fluxus and fluxus.queue_on_teleport)
-    if not queueFunc then return end
-
     local url = CONFIG.GitHubRawURL
     if (not url or url == "") and getgenv and getgenv().FruitSniperURL then
         url = getgenv().FruitSniperURL
@@ -98,48 +95,29 @@ local function setupAutoRestart()
 
     if url and url ~= "" then
         pcall(function()
-            if writefile then writefile("BF_ScriptURL.txt", url) end
-        end)
-        pcall(function()
-            queueFunc(string.format([[
-                task.spawn(function()
-                    repeat task.wait(0.5) until game:IsLoaded() and game:GetService("Players").LocalPlayer
-                    task.wait(4)
-                    pcall(function()
-                        loadstring(game:HttpGet("%s"))()
-                    end)
-                end)
-            ]], url))
-        end)
-    elseif isfile and isfile("FruitSniper.lua") then
-        pcall(function()
-            queueFunc([[
-                task.spawn(function()
-                    repeat task.wait(0.5) until game:IsLoaded() and game:GetService("Players").LocalPlayer
-                    task.wait(4)
-                    pcall(function()
-                        loadstring(readfile("FruitSniper.lua"))()
-                    end)
-                end)
-            ]])
+            if writefile then
+                writefile("BF_ScriptURL.txt", url)
+                writefile("autoexec/FruitSniper.lua", string.format('task.wait(3); pcall(function() loadstring(game:HttpGet("%s"))() end)', url))
+            end
         end)
     end
 end
 
-LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
+local antiAfkConn = nil
+pcall(function()
+    if getconnections then
+        for _, conn in pairs(getconnections(LocalPlayer.Idled)) do
+            pcall(function() conn:Disable() end)
+        end
+    end
 end)
 
-task.spawn(function()
-    while scriptActive do
-        task.wait(120)
-        if not scriptActive then break end
-        pcall(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new())
-        end)
-    end
+antiAfkConn = LocalPlayer.Idled:Connect(function()
+    pcall(function()
+        VirtualUser:Button2Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+        task.wait(0.2)
+        VirtualUser:Button2Up(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+    end)
 end)
 
 local function checkIsAdmin(player)
@@ -797,9 +775,9 @@ createSettingRow("💎 Trùng Kho:", "Bảo Vệ Trái", 80, function(btn)
     end
 end)
 
-createSettingRow("🔄 Tự Chạy Lại:", "BẬT (Tự Động)", 120, function(btn)
+createSettingRow("🔄 Tự Chạy Lại:", "TẮT (Chống Văng)", 120, function(btn)
     CONFIG.AutoReExecute = not CONFIG.AutoReExecute
-    btn.Text = CONFIG.AutoReExecute and "BẬT (Tự Động)" or "TẮT"
+    btn.Text = CONFIG.AutoReExecute and "BẬT (Autoexec)" or "TẮT (Chống Văng)"
 end)
 
 createSettingRow("👻 Tàng Hình:", "BẬT", 160, function(btn)
@@ -985,37 +963,36 @@ local function updateFruitDisplay(fruitName, distance)
     end
 end
 
+local teamSelected = false
 local function autoSelectTeam()
+    if teamSelected then return end
+    if LocalPlayer.Team ~= nil and tostring(LocalPlayer.Team) ~= "" and tostring(LocalPlayer.Team) ~= "Neutral" then
+        teamSelected = true
+        return
+    end
     pcall(function()
-        local rem = ReplicatedStorage:WaitForChild("Remotes", 5)
-        if rem then
-            local comm = rem:WaitForChild("CommF_", 5)
-            if comm then
-                comm:InvokeServer("SetTeam", CONFIG.Team)
-            end
-        end
-    end)
-    pcall(function()
-        local pGui = LocalPlayer:WaitForChild("PlayerGui", 5)
-        if pGui and pGui:FindFirstChild("Main") and pGui.Main:FindFirstChild("ChooseTeam") and pGui.Main.ChooseTeam.Visible then
-            local teamBtn = pGui.Main.ChooseTeam.Container[CONFIG.Team].Frame.ViewportFrame.TextButton
-            if getconnections then
-                for _, conn in pairs(getconnections(teamBtn.MouseButton1Click)) do pcall(function() conn:Fire() end) end
-            end
+        local rem = ReplicatedStorage:WaitForChild("Remotes", 8)
+        local comm = rem and (rem:WaitForChild("CommF_", 8) or rem:WaitForChild("CommF", 8))
+        if comm then
+            comm:InvokeServer("SetTeam", CONFIG.Team or "Pirates")
+            teamSelected = true
         end
     end)
 end
 
 task.spawn(function()
-    for _ = 1, 6 do
-        if LocalPlayer.Team ~= nil and (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")) then
-            break
+    task.wait(1)
+    for _ = 1, 8 do
+        if LocalPlayer.Team ~= nil and tostring(LocalPlayer.Team) ~= "" and tostring(LocalPlayer.Team) ~= "Neutral" then
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                break
+            end
         end
         autoSelectTeam()
-        task.wait(0.8)
+        task.wait(1.2)
     end
 end)
-task.wait(1.2)
+task.wait(1.5)
 
 local function getCharacter()
     local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -1393,15 +1370,9 @@ local function triggerUiButtonClick(btn)
     end)
 
     pcall(function()
-        if getconnections then
-            for _, conn in pairs(getconnections(btn.MouseButton1Click)) do
-                pcall(function() conn:Fire() end)
-                pcall(function() if conn.Function then conn.Function() end end)
-            end
-            for _, conn in pairs(getconnections(btn.Activated)) do
-                pcall(function() conn:Fire() end)
-                pcall(function() if conn.Function then conn.Function() end end)
-            end
+        if firesignal then
+            firesignal(btn.MouseButton1Click)
+            firesignal(btn.Activated)
         end
     end)
 
@@ -1668,32 +1639,49 @@ local function hopToRealNewServer()
         saveServerVisited(chosen.id)
 
         pcall(function()
+            if antiAfkConn then
+                antiAfkConn:Disconnect()
+                antiAfkConn = nil
+            end
             disableNoclip()
-            if ScreenGui and ScreenGui.Parent then ScreenGui:Destroy() end
+            if ScreenGui then ScreenGui.Enabled = false end
         end)
-        task.wait(0.2)
+        task.wait(0.6)
 
-        pcall(function()
+        local tpSuccess = pcall(function()
             TeleportService:TeleportToPlaceInstance(PlaceId, chosen.id, LocalPlayer)
         end)
+
+        if not tpSuccess then
+            pcall(function()
+                TeleportService:Teleport(PlaceId, LocalPlayer)
+            end)
+        end
 
         task.wait(25)
         STATE.IsHopping = false
         scriptActive = true
-        hopToRealNewServer()
+        pcall(function()
+            if ScreenGui then ScreenGui.Enabled = true end
+        end)
+        task.spawn(hopToRealNewServer)
     else
-        task.wait(2.5)
+        task.wait(3.5)
         STATE.IsHopping = false
         scriptActive = true
-        hopToRealNewServer()
+        task.spawn(hopToRealNewServer)
     end
 end
 
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
+        task.wait(6)
         STATE.IsHopping = false
-        task.wait(1)
-        hopToRealNewServer()
+        scriptActive = true
+        pcall(function()
+            if ScreenGui then ScreenGui.Enabled = true end
+        end)
+        task.spawn(hopToRealNewServer)
     end
 end)
 
@@ -1723,6 +1711,12 @@ end
 
 local function runFruitHunter()
     while STATE.IsPaused do task.wait(1) end
+
+    while not (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")) do
+        autoSelectTeam()
+        task.wait(1)
+    end
+    task.wait(0.5)
 
     setStatus("🔍 Đang quét trái ác quỷ THẬT...", Color3.fromRGB(0, 240, 255))
     task.wait(0.8)
