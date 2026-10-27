@@ -1,4 +1,9 @@
 if getgenv then
+    getgenv().FruitSniperURL = "https://raw.githubusercontent.com/Kaijuvn/Bloxfruit/refs/heads/main/BloxFruits_FruitSniper_ServerHop.lua"
+end
+_G.FruitSniperURL = "https://raw.githubusercontent.com/Kaijuvn/Bloxfruit/refs/heads/main/BloxFruits_FruitSniper_ServerHop.lua"
+
+if getgenv then
     if getgenv().VipFruitSniperActive then
         pcall(function()
             if getgenv().VipFruitSniperGui and getgenv().VipFruitSniperGui.Parent then
@@ -20,7 +25,8 @@ local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+local VirtualInputManager = nil
+pcall(function() VirtualInputManager = game:GetService("VirtualInputManager") end)
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -31,7 +37,7 @@ repeat task.wait(0.3) until LocalPlayer:FindFirstChild("PlayerGui")
 task.wait(2)
 
 local CONFIG = {
-    GitHubRawURL = (getgenv and getgenv().FruitSniperURL) or _G.FruitSniperURL or "",
+    GitHubRawURL = "https://raw.githubusercontent.com/Kaijuvn/Bloxfruit/refs/heads/main/BloxFruits_FruitSniper_ServerHop.lua",
     AutoReExecute = true,
     GhostInvisibility = true,
     StealthFlyAltitude = 280,
@@ -80,8 +86,10 @@ end
 local MenuBgAsset = resolveAsset("BF_MenuBg.jpg", CONFIG.DefaultBackground)
 local GojoIconAsset = resolveAsset("BF_GojoIcon.jpg", CONFIG.DefaultIcon)
 
+local teleportQueued = false
 local function setupAutoRestart()
-    if not CONFIG.AutoReExecute then return end
+    if teleportQueued or not CONFIG.AutoReExecute then return end
+
     local queueFunc = (syn and syn.queue_on_teleport) or queue_on_teleport or queueonteleport or (fluxus and fluxus.queue_on_teleport)
     if not queueFunc then return end
 
@@ -95,69 +103,21 @@ local function setupAutoRestart()
     if (not url or url == "") and isfile and isfile("BF_ScriptURL.txt") then
         pcall(function() url = readfile("BF_ScriptURL.txt") end)
     end
-
-    if url and url ~= "" then
-        pcall(function()
-            if writefile then
-                writefile("BF_ScriptURL.txt", url)
-                writefile("autoexec/FruitSniper.lua", string.format('task.wait(4); pcall(function() loadstring(game:HttpGet("%s"))() end)', url))
-            end
-        end)
-        pcall(function()
-            queueFunc(string.format([[
-                task.spawn(function()
-                    repeat task.wait(1) until game:IsLoaded()
-                    local plrs = game:GetService("Players")
-                    repeat task.wait(1) until plrs.LocalPlayer
-                    task.wait(4)
-                    pcall(function()
-                        loadstring(game:HttpGet("%s"))()
-                    end)
-                end)
-            ]], url))
-        end)
-    else
-        local localFile = nil
-        local candidates = {"FruitSniper.lua", "fruitsniper.lua", "BloxFruits_FruitSniper_ServerHop.lua", "Sniper.lua"}
-        if isfile then
-            for _, fn in ipairs(candidates) do
-                if isfile(fn) then localFile = fn break end
-            end
-        end
-
-        if localFile then
-            pcall(function()
-                queueFunc(string.format([[
-                    task.spawn(function()
-                        repeat task.wait(1) until game:IsLoaded()
-                        local plrs = game:GetService("Players")
-                        repeat task.wait(1) until plrs.LocalPlayer
-                        task.wait(4)
-                        pcall(function()
-                            loadstring(readfile("%s"))()
-                        end)
-                    end)
-                ]], localFile))
-            end)
-        else
-            pcall(function()
-                queueFunc([[
-                    task.spawn(function()
-                        repeat task.wait(1) until game:IsLoaded()
-                        local plrs = game:GetService("Players")
-                        repeat task.wait(1) until plrs.LocalPlayer
-                        task.wait(4)
-                        if isfile and isfile("FruitSniper.lua") then
-                            pcall(function() loadstring(readfile("FruitSniper.lua"))() end)
-                        elseif isfile and isfile("BF_ScriptURL.txt") then
-                            pcall(function() loadstring(game:HttpGet(readfile("BF_ScriptURL.txt")))() end)
-                        end
-                    end)
-                ]])
-            end)
-        end
+    if not url or url == "" then
+        url = "https://raw.githubusercontent.com/Kaijuvn/Bloxfruit/refs/heads/main/BloxFruits_FruitSniper_ServerHop.lua"
     end
+
+    teleportQueued = true
+    pcall(function()
+        if writefile then writefile("BF_ScriptURL.txt", url) end
+    end)
+
+    local payload = string.format('task.spawn(function() repeat task.wait(0.5) until game:IsLoaded(); task.wait(2.5); pcall(function() loadstring(game:HttpGet("%s"))() end) end)', url)
+    pcall(queueFunc, payload)
 end
+
+pcall(setupAutoRestart)
+
 
 local antiAfkConn = nil
 pcall(function()
